@@ -1,4 +1,8 @@
-export type Plan = "FREE" | "PRO" | "ENTERPRISE";
+export type Plan =
+  | "FREE"
+  | "PRO"
+  | "ENTERPRISE"
+  | "DEMO_THROTTLED";
 
 export interface RateLimitInfo {
   requestsUsedThisWindow: number;

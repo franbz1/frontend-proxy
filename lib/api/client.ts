@@ -1,3 +1,4 @@
+import type { DemoUser } from "@/lib/types/demo";
 import type {
   ApiErrorResponse,
   DailyUsageHistoryResponse,
@@ -49,6 +50,23 @@ async function handleErrorResponse(res: Response): Promise<never> {
   const retryAfter = retryAfterFromResponse(res, body);
   const message = body?.message ?? res.statusText ?? "Request failed";
   throw new ApiRequestError(message, res.status, body, retryAfter);
+}
+
+export async function getDemoUsers(): Promise<DemoUser[]> {
+  const res = await fetch(`${getBaseUrl()}/api/demo/users`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  if (!res.ok) await handleErrorResponse(res);
+  return res.json() as Promise<DemoUser[]>;
+}
+
+export async function postResetRateLimit(): Promise<void> {
+  const res = await fetch(`${getBaseUrl()}/api/demo/reset-rate-limit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) await handleErrorResponse(res);
 }
 
 export async function getQuotaStatus(userId: string): Promise<QuotaStatusResponse> {

@@ -2,12 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  getDemoUsers,
   getQuotaHistory,
   getQuotaStatus,
   postGenerate,
   postUpgrade,
 } from "@/lib/api/client";
-import type { DailyUsageHistoryResponse, QuotaStatusResponse } from "@/lib/types/quota";
+import { DemoToolbar } from "@/components/DemoToolbar";
+import { FALLBACK_DEMO_USERS } from "@/lib/demo-users-fallback";
+import type {
+  DailyUsageHistoryResponse,
+  GenerationResponse,
+  QuotaStatusResponse,
+} from "@/lib/types/quota";
 import { ApiRequestError } from "@/lib/types/quota";
 import { estimateTotalTokensForPrompt, getFixedOutputTokens } from "@/lib/token-estimate";
 import { useBlockedCooldown } from "@/hooks/useBlockedCooldown";
@@ -32,6 +39,32 @@ export default function Dashboard() {
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [blockedUntilMs, setBlockedUntilMs] = useState<number | null>(null);
+  const [userOptions, setUserOptions] = useState<
+    { id: string; label: string }[]
+  >(() => [...FALLBACK_DEMO_USERS]);
+  const [usersLoading, setUsersLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUsersLoading(true);
+    getDemoUsers()
+      .then((rows) => {
+        if (cancelled) return;
+        setUserOptions(
+          rows.map((r) => ({ id: r.externalId, label: r.displayLabel }))
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setUserOptions([...FALLBACK_DEMO_USERS]);
+      })
+      .finally(() => {
+        if (!cancelled) setUsersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -44,6 +77,19 @@ export default function Dashboard() {
     });
     return () => cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (userOptions.length === 0) return;
+    if (!userOptions.some((o) => o.id === userId)) {
+      const next = userOptions[0].id;
+      setUserId(next);
+      try {
+        localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [userOptions, userId]);
 
   const refreshQuota = useCallback(async () => {
     await Promise.resolve();
@@ -167,6 +213,25 @@ export default function Dashboard() {
     }
   };
 
+  const handleDemoGenerationSuccess = useCallback(
+    (
+      res: GenerationResponse,
+      meta: { source: "burst" | "demo-prompt"; userLine?: string }
+    ) => {
+      setQuota(res.quotaStatus);
+      void getQuotaHistory(userId).then(setHistory);
+      if (meta.source === "demo-prompt") {
+        const line = meta.userLine ?? "[demo]";
+        setMessages((m) => [
+          ...m,
+          { role: "user", content: line },
+          { role: "assistant", content: res.text },
+        ]);
+      }
+    },
+    [userId]
+  );
+
   const estimatorLine = (
     <>
       Estimación de esta petición:{" "}
@@ -187,14 +252,28 @@ export default function Dashboard() {
     ) : null;
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-6 p-4 md:flex-row md:p-8">
-      <aside className="flex w-full flex-col gap-4 md:w-80 md:shrink-0">
-        <UserSwitcher userId={userId} onChange={handleUserChange} />
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 flex-col gap-6 overflow-hidden p-4 md:flex-row md:p-8">
+      <aside className="flex min-h-0 w-full flex-col gap-4 overflow-y-auto md:w-80 md:max-h-full md:shrink-0">
+        <UserSwitcher
+          userId={userId}
+          onChange={handleUserChange}
+          options={userOptions}
+          loading={usersLoading}
+        />
+        <DemoToolbar
+          userId={userId}
+          onGenerationSuccess={handleDemoGenerationSuccess}
+          onRateLimited={(sec) =>
+            setBlockedUntilMs(Date.now() + sec * 1000)
+          }
+          onQuotaExhausted={() => setUpgradeOpen(true)}
+          refreshQuota={refreshQuota}
+        />
         <QuotaPanel status={quota} />
         {history && <UsageChart days={history.days} />}
       </aside>
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden">
         {quota &&
           quota.tokensRemainingThisMonth === 0 &&
           quota.plan === "FREE" && (
